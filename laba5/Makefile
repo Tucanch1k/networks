@@ -4,16 +4,15 @@ CFLAGS = -Wall -Wextra -pthread
 SERVER = server
 CLIENT = client
 
-SERVER_SRC = tcp_server.c
-CLIENT_SRC = tcp_client.c
-
 all: $(SERVER) $(CLIENT)
 
-$(SERVER): $(SERVER_SRC)
-	$(CC) $(CFLAGS) $(SERVER_SRC) -o $(SERVER)
+$(SERVER): tcp_server.c
+	$(CC) $(CFLAGS) tcp_server.c -o $(SERVER)
 
-$(CLIENT): $(CLIENT_SRC)
-	$(CC) $(CFLAGS) $(CLIENT_SRC) -o $(CLIENT)
+$(CLIENT): tcp_server.c
+	$(CC) $(CFLAGS) tcp_client.c -o $(CLIENT)
 
 clean:
-	rm -f $(SERVER) $(CLIENT) history.json
+	-rm -f $(SERVER) $(CLIENT) history.json
+
+re: clean all
