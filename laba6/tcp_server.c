@@ -295,12 +295,29 @@ void *worker(void *arg)
             int r = recv_all(sock, &msg, sizeof(msg));
             if (r <= 0) break;
 
-            printf("[Transport][RECV] type=%d id=%u from %s\n", msg.type, msg.msg_id, msg.sender);
-
+            // Проверяем потерю
             if (net_drop(msg.msg_id)) continue;
 
-            if (duplicate(&msg)) continue;
+            // Проверяем дубликат (и одновременно добавляем в seen если новый)
+            int is_duplicate = duplicate(&msg);
+            
+            // Логируем RECV только если сообщение НЕ потеряно
+            // и это ПЕРВОЕ получение (не дубликат)
+            if (!is_duplicate)
+            {
+                printf("[Transport][RECV] type=%d id=%u from %s\n", msg.type, msg.msg_id, msg.sender);
+            }
+            
+            // Если дубликат - просто игнорируем (не обрабатываем, но ACK отправляем)
+            if (is_duplicate)
+            {
+                // Для дубликатов всё равно отправляем ACK (для клиента, который ждёт)
+                if (msg.type != MSG_ACK)
+                    send_ack(sock, msg.msg_id);
+                continue;
+            }
 
+            // Отправляем ACK для нового сообщения
             if (msg.type != MSG_ACK)
                 send_ack(sock, msg.msg_id);
 

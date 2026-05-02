@@ -157,6 +157,7 @@ int wait_ack(uint32_t id)
 
 int reliable_send(MessageEx *m)
 {
+    // Для PING не добавляем в pending через reliable_send
     if (m->type != MSG_ACK && m->type != MSG_PING)
     {
         add_pending(m, now_ms());
@@ -176,7 +177,18 @@ int reliable_send(MessageEx *m)
         }
 
         if (wait_ack(m->msg_id))
+        {
+            // Успешно получен ACK
+            if (m->type != MSG_PING)
+                remove_pending(m->msg_id);
             return 1;
+        }
+
+        // Таймаут - ретрансляция
+        if (i < MAX_RETRIES - 1)
+        {
+            printf("[Transport][RETRY] resend %d/%d (id=%u)\n", i + 1, MAX_RETRIES, m->msg_id);
+        }
     }
 
     if (m->type != MSG_PING)
@@ -185,40 +197,12 @@ int reliable_send(MessageEx *m)
     return 0;
 }
 
-void* retransmit_handler(void *arg)
-{
-    while (1)
-    {
-        sleep(1);
-        pthread_mutex_lock(&pending_mutex);
-        double now = now_ms();
-        for (int i = 0; i < pending_count; i++)
-        {
-            if (pending[i].waiting && (now - pending[i].send_time_ms) > TIMEOUT_MS)
-            {
-                if (pending[i].retries < MAX_RETRIES)
-                {
-                    pending[i].retries++;
-                    pending[i].send_time_ms = now;
-                    send_all(sock, &pending[i].msg, sizeof(pending[i].msg));
-                }
-                else
-                {
-                    pending[i].waiting = 0;
-                }
-            }
-        }
-        pthread_mutex_unlock(&pending_mutex);
-    }
-    return NULL;
-}
-
 void print_help()
 {
     printf("\n=== Commands ===\n");
     printf("/help           - Show help\n");
     printf("/list           - Show online users\n");
-    printf("/history [N]    - Show last N messages (default 50)\n");
+    printf("/history [N]    - Show last N messages\n");
     printf("/w <nick> <msg> - Private message\n");
     printf("/ping [N]       - Send N pings (default 10)\n");
     printf("/netdiag        - Show network stats\n");
@@ -269,12 +253,6 @@ void* receiver(void *arg)
             last_ack_id = m.msg_id;
             pthread_cond_broadcast(&ack_cond);
             pthread_mutex_unlock(&ack_mutex);
-            
-            double send_time = get_pending_send_time(m.msg_id);
-            if (send_time < 0)
-            {
-                remove_pending(m.msg_id);
-            }
             continue;
         }
 
@@ -355,7 +333,7 @@ void ping_many(int n)
     for (int i = 0; i < n; i++)
     {
         ping_once(i + 1);
-        usleep(100000);
+        usleep(200000);
     }
     
     printf("Waiting for responses...\n");
@@ -454,10 +432,6 @@ int main()
     fflush(stdout);
     fgets(nickname, sizeof(nickname), stdin);
     nickname[strcspn(nickname, "\n")] = 0;
-
-    pthread_t rt_thread;
-    pthread_create(&rt_thread, NULL, retransmit_handler, NULL);
-    pthread_detach(rt_thread);
 
     while (1)
     {
